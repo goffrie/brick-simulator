@@ -103,7 +103,6 @@ impl Dp {
         }
         let chance = f64::from(state.chance) * 0.01;
         let (s1, s2, ix) = (0..3)
-            .rev()
             .filter(|&ix| state.available[ix] > 0)
             .map(|ix| {
                 let (p1, p2, _) = self.evaluate(state.hit(ix, true), false);
@@ -114,7 +113,13 @@ impl Dp {
                     ix,
                 )
             })
-            .max_by(|a, b| a.partial_cmp(b).expect("NaN happened"))
+            .max_by(|(a1, a2, aix), (b1, b2, bix)| {
+                // Tiebreak by lower effect index for aesthetic reasons
+                (a1, a2)
+                    .partial_cmp(&(b1, b2))
+                    .expect("NaN happened")
+                    .then(bix.cmp(aix))
+            })
             .unwrap();
         self.memo[key] = (s1, s2);
         (s1, s2, ix)
