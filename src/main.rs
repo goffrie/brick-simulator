@@ -103,40 +103,50 @@ struct Dp {
 
 impl Dp {
     fn init(pips: u8, objective: Objective) -> Dp {
-        let mut memo = vec![(-1.0, -1.0); DP_SIZE];
-        for chance in (25..=75).step_by(10) {
-            for p1 in 0..=pips {
-                for p2 in 0..=pips {
-                    for p3 in 0..=pips {
-                        let st = State {
-                            chance,
-                            available: [0; 3],
-                            success: [p1, p2, p3],
-                        };
-                        let (ok, weight) = objective.evaluate(st);
-                        memo[st.key()] = (if ok { 1.0 } else { 0.0 }, weight);
+        let mut dp = Dp {
+            memo: vec![(-1.0, -1.0); DP_SIZE],
+        };
+        for a1 in 0..=pips {
+            for a2 in 0..=pips {
+                for a3 in 0..=pips {
+                    for chance in (25..=75).step_by(10) {
+                        for s1 in 0..=(pips - a1) {
+                            for s2 in 0..=(pips - a2) {
+                                for s3 in 0..=(pips - a3) {
+                                    let st = State {
+                                        chance,
+                                        available: [a1, a2, a3],
+                                        success: [s1, s2, s3],
+                                    };
+                                    if st.terminal() {
+                                        let (ok, weight) = objective.evaluate(st);
+                                        dp.memo[st.key()] = (if ok { 1.0 } else { 0.0 }, weight);
+                                    } else {
+                                        let (a, b, _) = dp.evaluate(st);
+                                        dp.memo[st.key()] = (a, b);
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
-        Dp { memo }
+        dp
     }
 
-    fn evaluate(&mut self, state: State, return_path: bool) -> (f64, f64, usize) {
-        let key = state.key();
-        if return_path && state.terminal() {
+    fn evaluate(&self, state: State) -> (f64, f64, usize) {
+        if state.terminal() {
             return (0.0, 0.0, 3);
-        }
-        if !return_path && self.memo[key].0 >= 0.0 {
-            let (s1, s2) = self.memo[key];
-            return (s1, s2, 0);
         }
         let chance = f64::from(state.chance) * 0.01;
         let (s1, s2, ix) = (0..3)
             .filter(|&ix| state.available[ix] > 0)
             .map(|ix| {
-                let (p1, p2, _) = self.evaluate(state.hit(ix, true), false);
-                let (n1, n2, _) = self.evaluate(state.hit(ix, false), false);
+                let (p1, p2) = self.memo[state.hit(ix, true).key()];
+                let (n1, n2) = self.memo[state.hit(ix, false).key()];
+                debug_assert!(p1 >= 0.0);
+                debug_assert!(n1 >= 0.0);
                 (
                     p1 * chance + n1 * (1.0 - chance),
                     p2 * chance + n2 * (1.0 - chance),
@@ -151,7 +161,6 @@ impl Dp {
                     .then(bix.cmp(aix))
             })
             .unwrap();
-        self.memo[key] = (s1, s2);
         (s1, s2, ix)
     }
 }
@@ -291,8 +300,8 @@ fn model() -> Html {
     let dp_state = use_state(|| RefCell::new(None));
     let mut dp_cell = dp_state.borrow_mut();
     let dp = match *dp_cell {
-        Some((ref args, ref mut dp)) if *args == dp_args => dp,
-        _ => &mut dp_cell.insert((dp_args, Dp::init(dp_args.0, dp_args.1))).1,
+        Some((ref args, ref dp)) if *args == dp_args => dp,
+        _ => &dp_cell.insert((dp_args, Dp::init(dp_args.0, dp_args.1))).1,
     };
 
     let states = [&*s1, &*s2, &*s3];
@@ -301,7 +310,7 @@ fn model() -> Html {
         available: states.map(|s| (*pips).saturating_sub(s.len()) as u8),
         success: states.map(|s| s.iter().filter(|&&x| x).count() as u8),
     };
-    let (success_rate, expected_weight, which_hit) = dp.evaluate(state, true);
+    let (success_rate, expected_weight, which_hit) = dp.evaluate(state);
     let analysis = if state.terminal() {
         Html::default()
     } else {
