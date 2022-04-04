@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Brick Simulator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans&display=swap" rel="stylesheet"> 
+    <style type="text/css">
+      body {
+        font-size: 17px;
+        font-family: 'Open Sans', sans-serif;
+      }
+      input, select, button {
+        font-size: inherit;
+      }
+      input {
+        width: 8ch;
+      }
+      #inputs input, #inputs select {
+        margin: 0 1ch;
+      }
+      #inputs {
+        display: table;
+      }
+      #inputs > div {
+        display: table-row;
+      }
+      #inputs label, #inputs input, #inputs select {
+        display: table-cell;
+      }
+      .pip {
+        display: inline-block;
+        width: 2.5ch;
+        margin: 0.5ch;
+        text-align: center;
+        border: 1px solid grey;
+        padding: 0.5ch;
+        border-radius: 0.5ch;
+      }
+      .pip.success {
+        background-color: #ddf;
+      }
+      .pip.fail {
+        background-color: #ddd;
+      }
+      #status3 .pip.success {
+        background-color: #fdd;
+      }
+      .status {
+        border: 2px dashed transparent;
+      }
+      .status.should_hit {
+        border-color: #aaf;
+      }
+      .hit {
+        width: 100px;
+        height: 40px;
+        margin: 0.5ch;
+      }
+    </style>
+  </head>
+</html>
