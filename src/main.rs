@@ -93,10 +93,10 @@ impl Dp {
     }
 
     fn evaluate(&mut self, state: State, return_path: bool) -> (f64, f64, usize) {
-        if state.terminal() {
+        let key = state.key();
+        if return_path && state.terminal() {
             return (0.0, 0.0, 3);
         }
-        let key = state.key();
         if !return_path && self.memo[key].0 >= 0.0 {
             let (s1, s2) = self.memo[key];
             return (s1, s2, 0);
