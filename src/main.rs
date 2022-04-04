@@ -9,7 +9,8 @@ use yew::prelude::*;
 
 const MAX_PIPS: usize = 10;
 const MP: usize = MAX_PIPS + 1;
-const DP_SIZE: usize = ((75 - 25) / 10 + 1) * MP.pow(6);
+const MPT: usize = MP * (MP + 1) / 2;
+const DP_SIZE: usize = ((75 - 25) / 10 + 1) * MPT.pow(3);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct State {
@@ -21,12 +22,14 @@ impl State {
     fn key(&self) -> usize {
         let State {
             chance,
-            available: [a1, a2, a3],
-            success: [s1, s2, s3],
+            available,
+            success,
         } = *self;
         let mut r = usize::from((chance - 25) / 10);
-        for v in [a1, a2, a3, s1, s2, s3] {
-            r = r * MP + usize::from(v);
+        for i in 0..3 {
+            let used = MAX_PIPS - usize::from(available[i]);
+            let s = usize::from(success[i]);
+            r = r * MPT + used * (used + 1) / 2 + s;
         }
         r
     }
@@ -47,6 +50,33 @@ impl State {
     fn terminal(&self) -> bool {
         self.available == [0; 3]
     }
+}
+
+#[test]
+fn test_dense_key_space() {
+    let mut v = vec![false; DP_SIZE];
+    for chance in (25..=75).step_by(10) {
+        for a1 in 0..=MAX_PIPS {
+            for s1 in 0..=(MAX_PIPS - a1) {
+                for a2 in 0..=MAX_PIPS {
+                    for s2 in 0..=(MAX_PIPS - a2) {
+                        for a3 in 0..=MAX_PIPS {
+                            for s3 in 0..=(MAX_PIPS - a3) {
+                                let state = State {
+                                    chance,
+                                    available: [a1 as u8, a2 as u8, a3 as u8],
+                                    success: [s1 as u8, s2 as u8, s3 as u8],
+                                };
+                                assert!(!v[state.key()]); // no overlaps
+                                v[state.key()] = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(v == vec![true; DP_SIZE]); // all slots used
 }
 
 #[derive(Clone, Copy, PartialEq)]
