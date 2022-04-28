@@ -4,7 +4,9 @@ use std::{
     str::FromStr,
 };
 
-use web_sys::{HtmlInputElement, HtmlSelectElement};
+use js_sys::Math;
+use wasm_bindgen::{prelude::Closure, JsCast};
+use web_sys::{window, HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;
 
 const MAX_PIPS: usize = 10;
@@ -125,7 +127,8 @@ impl Dp {
     fn evaluate(&mut self, state: State, return_path: bool) -> (f64, f64, usize) {
         let key = state.key();
         if return_path && state.terminal() {
-            return (0.0, 0.0, 3);
+            let (s1, s2) = self.memo[key];
+            return (s1, s2, 3);
         }
         if !return_path && self.memo[key].0 >= 0.0 {
             let (s1, s2) = self.memo[key];
@@ -238,6 +241,21 @@ fn model() -> Html {
     let s1 = use_state_eq(|| vec![]);
     let s2 = use_state_eq(|| vec![]);
     let s3 = use_state_eq(|| vec![]);
+    let autobrick_enabled =
+        use_state_eq(|| Some(window()?.location().search().ok()?.contains("autobrick")));
+    let autobrick_enabled = *autobrick_enabled == Some(true);
+    let autobrick = use_state_eq(|| None);
+    let do_hit = |s: &UseStateHandle<Vec<bool>>, chance: &UseStateHandle<i32>, success: bool| {
+        let mut next = (**s).clone();
+        next.push(success);
+        s.set(next);
+        if success && **chance > 25 {
+            chance.set(**chance - 10);
+        }
+        if !success && **chance < 75 {
+            chance.set(**chance + 10);
+        }
+    };
     let ctrl = |s: UseStateHandle<Vec<bool>>, id: &'static str, should_hit: bool| {
         html! {
             <div id={id} class={if should_hit { "status should_hit" } else { "status" }}>
@@ -254,15 +272,7 @@ fn model() -> Html {
                             let s = s.clone();
                             let chance = chance.clone();
                             move |_e: MouseEvent| {
-                                let mut next = (*s).clone();
-                                next.push(success);
-                                s.set(next);
-                                if success && *chance > 25 {
-                                    chance.set(*chance - 10);
-                                }
-                                if !success && *chance < 75 {
-                                    chance.set(*chance + 10);
-                                }
+                                do_hit(&s, &chance, success);
                             }
                         }>{label}</button>
                     }).collect::<Html>()
@@ -275,6 +285,11 @@ fn model() -> Html {
                         s.set(next);
                     }
                 }>{"Unhit"}</button>
+                <span class="sum">
+                {
+                    format!("{}", s.iter().filter(|&&x| x).count())
+                }
+                </span>
             </div>
         }
     };
@@ -302,17 +317,80 @@ fn model() -> Html {
         success: states.map(|s| s.iter().filter(|&&x| x).count() as u8),
     };
     let (success_rate, expected_weight, which_hit) = dp.evaluate(state, true);
-    let analysis = if state.terminal() {
-        Html::default()
+    let analysis = html! {
+        <div id="analysis">
+            {if state.terminal() { "".to_string() } else { format!("Next hit: effect {}", which_hit + 1) }}
+            <br />
+            {format!("Success probability: {:.3}%", success_rate * 100.0)}
+            <br />
+            {format!("Expected tiebreaking weight: {}", expected_weight)}
+        </div>
+    };
+    use_effect({
+        let (s1, s2, s3) = (s1.clone(), s2.clone(), s3.clone());
+        let (autobrick, pips, chance) = (autobrick.clone(), pips.clone(), chance.clone());
+        let target = *autobrick;
+        let current = s1.len() + s2.len() + s3.len();
+        move || {
+            log::info!("{:?}", *autobrick);
+            let id = match *autobrick {
+                Some(v) if v < *pips * 3 => {
+                    let autobrick = autobrick.clone();
+                    let closure = Closure::once(move || {
+                        autobrick.set(Some(v + 1));
+                    });
+                    let id = Some(
+                        window()
+                            .unwrap()
+                            .set_timeout_with_callback_and_timeout_and_arguments_0(
+                                closure.as_ref().unchecked_ref(),
+                                100,
+                            )
+                            .unwrap(),
+                    );
+                    closure.forget();
+                    id
+                }
+                Some(_) => {
+                    autobrick.set(None);
+                    None
+                }
+                None => None,
+            };
+            if target.map_or(false, |t| t > current) {
+                let success = Math::random() * 100.0 < f64::from(*chance);
+                let s = [&s1, &s2, &s3][which_hit];
+                do_hit(s, &chance, success);
+            }
+            move || {
+                if let Some(id) = id {
+                    window().unwrap().clear_timeout_with_handle(id);
+                }
+            }
+        }
+    });
+    let autobrick_button = if autobrick_enabled {
+        let (autobrick, s1, s2, s3, chance) = (
+            autobrick.clone(),
+            s1.clone(),
+            s2.clone(),
+            s3.clone(),
+            chance.clone(),
+        );
+        let onclick = move |_e: MouseEvent| {
+            autobrick.set(None);
+            s1.set(vec![]);
+            s2.set(vec![]);
+            s3.set(vec![]);
+            chance.set(75);
+            autobrick.set(Some(0));
+        };
+        html! {
+            <button onclick={onclick}>{"Autobrick"}</button>
+        }
     } else {
         html! {
-            <div id="analysis">
-                {format!("Next hit: effect {}", which_hit + 1)}
-                <br />
-                {format!("Success probability: {:.2}%", success_rate * 100.0)}
-                <br />
-                {format!("Expected tiebreaking weight: {}", expected_weight)}
-            </div>
+            <></>
         }
     };
     return html! {
@@ -324,19 +402,19 @@ fn model() -> Html {
                 </div>
                 <div>
                     <label for="min1">{"Effect 1 min"}</label>
-                    {number(min1, "min1", "1", "10", "1")}
+                    {number(min1, "min1", "0", "10", "1")}
                     <label for="w1">{"weight"}</label>
                     {number(w1, "w1", "", "", "0.1")}
                 </div>
                 <div>
                     <label for="min2">{"Effect 2 min"}</label>
-                    {number(min2, "min2", "1", "10", "1")}
+                    {number(min2, "min2", "0", "10", "1")}
                     <label for="w2">{"weight"}</label>
                     {number(w2, "w2", "", "", "0.1")}
                 </div>
                 <div>
                     <label for="max3">{"Effect 3 max"}</label>
-                    {number(max3, "max3", "1", "10", "1")}
+                    {number(max3, "max3", "0", "10", "1")}
                     <label for="w3">{"weight"}</label>
                     {number(w3, "w3", "", "", "0.1")}
                 </div>
@@ -352,14 +430,16 @@ fn model() -> Html {
                 {ctrl(s3.clone(), "status3", which_hit == 2)}
                 <button onclick={
                     let (s1, s2, s3) = (s1.clone(), s2.clone(), s3.clone());
-                    let chance = chance.clone();
+                    let (chance, autobrick) = (chance.clone(), autobrick.clone());
                     move |_e: MouseEvent| {
+                        autobrick.set(None);
                         s1.set(vec![]);
                         s2.set(vec![]);
                         s3.set(vec![]);
                         chance.set(75);
                     }
                 }>{"Reset"}</button>
+                {autobrick_button}
             </div>
             {analysis}
         </>
