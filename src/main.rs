@@ -1,11 +1,13 @@
+#![warn(unused_crate_dependencies)]
+
 use std::{
     cell::RefCell,
     fmt::{Debug, Display},
     str::FromStr,
 };
 
+use gloo_timers::callback::Timeout;
 use js_sys::Math;
-use wasm_bindgen::{prelude::Closure, JsCast};
 use web_sys::{window, HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;
 
@@ -333,23 +335,12 @@ fn model() -> Html {
         let current = s1.len() + s2.len() + s3.len();
         move || {
             log::info!("{:?}", *autobrick);
-            let id = match *autobrick {
+            let timeout = match *autobrick {
                 Some(v) if v < *pips * 3 => {
                     let autobrick = autobrick.clone();
-                    let closure = Closure::once(move || {
+                    Some(Timeout::new(100, move || {
                         autobrick.set(Some(v + 1));
-                    });
-                    let id = Some(
-                        window()
-                            .unwrap()
-                            .set_timeout_with_callback_and_timeout_and_arguments_0(
-                                closure.as_ref().unchecked_ref(),
-                                100,
-                            )
-                            .unwrap(),
-                    );
-                    closure.forget();
-                    id
+                    }))
                 }
                 Some(_) => {
                     autobrick.set(None);
@@ -363,8 +354,8 @@ fn model() -> Html {
                 do_hit(s, &chance, success);
             }
             move || {
-                if let Some(id) = id {
-                    window().unwrap().clear_timeout_with_handle(id);
+                if let Some(t) = timeout {
+                    t.cancel();
                 }
             }
         }
