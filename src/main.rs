@@ -233,9 +233,9 @@ fn number<T: Display + FromStr + PartialEq + 'static>(
 #[function_component(Model)]
 fn model() -> Html {
     let chance = use_state_eq(|| 75);
-    let pips = use_state_eq(|| 9);
-    let min1 = use_state_eq(|| 6);
-    let min2 = use_state_eq(|| 6);
+    let pips = use_state_eq(|| 10);
+    let min1 = use_state_eq(|| 7);
+    let min2 = use_state_eq(|| 7);
     let max3 = use_state_eq(|| 4);
     let w1 = use_state_eq(|| 1.0);
     let w2 = use_state_eq(|| 1.0);
