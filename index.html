@@ -14,11 +14,17 @@
       input, select, button {
         font-size: inherit;
       }
-      input {
+      input[type="number"] {
         width: 8ch;
+      }
+      #goal {
+        width: 30ch;
       }
       #inputs input, #inputs select {
         margin: 0 1ch;
+      }
+      input:invalid {
+        border-color: red;
       }
       #inputs {
         display: table;
@@ -26,7 +32,7 @@
       #inputs > div {
         display: table-row;
       }
-      #inputs label, #inputs input, #inputs select {
+      #inputs > div > label, #inputs > div > input, #inputs > div > select {
         display: table-cell;
       }
       .pip {

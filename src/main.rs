@@ -1,5 +1,8 @@
 #![warn(unused_crate_dependencies)]
 
+mod goal;
+mod state;
+
 use std::{
     cell::RefCell,
     fmt::{Debug, Display},
@@ -11,95 +14,13 @@ use js_sys::Math;
 use web_sys::{window, HtmlInputElement, HtmlSelectElement};
 use yew::prelude::*;
 
+use crate::goal::{Goal, Objective, SimpleGoal};
+use crate::state::State;
+
 const MAX_PIPS: usize = 10;
 const MP: usize = MAX_PIPS + 1;
 const MPT: usize = MP * (MP + 1) / 2;
 const DP_SIZE: usize = ((75 - 25) / 10 + 1) * MPT.pow(3);
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct State {
-    chance: u8,
-    available: [u8; 3],
-    success: [u8; 3],
-}
-impl State {
-    fn key(&self) -> usize {
-        let State {
-            chance,
-            available,
-            success,
-        } = *self;
-        let mut r = usize::from((chance - 25) / 10);
-        for i in 0..3 {
-            let used = MAX_PIPS - usize::from(available[i]);
-            let s = usize::from(success[i]);
-            r = r * MPT + used * (used + 1) / 2 + s;
-        }
-        r
-    }
-    fn hit(mut self, ix: usize, success: bool) -> Self {
-        if success && self.chance > 25 {
-            self.chance -= 10;
-        }
-        if !success && self.chance < 75 {
-            self.chance += 10;
-        }
-        assert!(self.available[ix] > 0);
-        self.available[ix] -= 1;
-        if success {
-            self.success[ix] += 1;
-        }
-        self
-    }
-    fn terminal(&self) -> bool {
-        self.available == [0; 3]
-    }
-}
-
-#[test]
-fn test_dense_key_space() {
-    let mut v = vec![false; DP_SIZE];
-    for chance in (25..=75).step_by(10) {
-        for a1 in 0..=MAX_PIPS {
-            for s1 in 0..=(MAX_PIPS - a1) {
-                for a2 in 0..=MAX_PIPS {
-                    for s2 in 0..=(MAX_PIPS - a2) {
-                        for a3 in 0..=MAX_PIPS {
-                            for s3 in 0..=(MAX_PIPS - a3) {
-                                let state = State {
-                                    chance,
-                                    available: [a1 as u8, a2 as u8, a3 as u8],
-                                    success: [s1 as u8, s2 as u8, s3 as u8],
-                                };
-                                assert!(!v[state.key()]); // no overlaps
-                                v[state.key()] = true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    assert!(v == vec![true; DP_SIZE]); // all slots used
-}
-
-#[derive(Clone, Copy, PartialEq)]
-struct Objective {
-    min_1: u8,
-    min_2: u8,
-    max_3: u8,
-    tiebreaking_weight: [f64; 3],
-}
-
-impl Objective {
-    fn evaluate(&self, state: State) -> (bool, f64) {
-        let [s1, s2, s3] = state.success;
-        let ok = s1 >= self.min_1 && s2 >= self.min_2 && s3 <= self.max_3;
-        let [w1, w2, w3] = self.tiebreaking_weight;
-        let weight = f64::from(s1) * w1 + f64::from(s2) * w2 + f64::from(s3) * w3;
-        (ok, weight)
-    }
-}
 
 struct Dp {
     memo: Vec<(f64, f64)>,
@@ -205,24 +126,22 @@ where
 }
 
 fn number<T: Display + FromStr + PartialEq + 'static>(
-    state: UseStateHandle<T>,
+    state: &UseStateHandle<T>,
     name: &'static str,
     min: &'static str,
     max: &'static str,
     step: &'static str,
 ) -> Html {
-    let onchange = {
-        let state = state.clone();
-        move |e: Event| {
-            // allow the user to temporarily input garbage,
-            // but it will be overwritten on the next render
-            if let Ok(v) = e
-                .target_unchecked_into::<HtmlInputElement>()
-                .value()
-                .parse()
-            {
-                state.set(v)
-            }
+    let state_ = state.clone();
+    let onchange = move |e: Event| {
+        // allow the user to temporarily input garbage,
+        // but it will be overwritten on the next render
+        if let Ok(v) = e
+            .target_unchecked_into::<HtmlInputElement>()
+            .value()
+            .parse()
+        {
+            state_.set(v)
         }
     };
     html! {
@@ -234,12 +153,7 @@ fn number<T: Display + FromStr + PartialEq + 'static>(
 fn model() -> Html {
     let chance = use_state_eq(|| 75);
     let pips = use_state_eq(|| 10);
-    let min1 = use_state_eq(|| 7);
-    let min2 = use_state_eq(|| 7);
-    let max3 = use_state_eq(|| 4);
-    let w1 = use_state_eq(|| 1.0);
-    let w2 = use_state_eq(|| 1.0);
-    let w3 = use_state_eq(|| -1.0);
+    let (objective, objective_form) = objective_form();
     let s1 = use_state_eq(|| vec![]);
     let s2 = use_state_eq(|| vec![]);
     let s3 = use_state_eq(|| vec![]);
@@ -298,18 +212,13 @@ fn model() -> Html {
     // Do some jank caching since this calculation is all happening on the main thread
     let dp_args = (
         *pips as u8,
-        Objective {
-            min_1: *min1,
-            min_2: *min2,
-            max_3: *max3,
-            tiebreaking_weight: [*w1, *w2, *w3],
-        },
+        objective.clone(),
     );
     let dp_state = use_state(|| RefCell::new(None));
     let mut dp_cell = dp_state.borrow_mut();
     let dp = match *dp_cell {
         Some((ref args, ref mut dp)) if *args == dp_args => dp,
-        _ => &mut dp_cell.insert((dp_args, Dp::init(dp_args.0, dp_args.1))).1,
+        _ => &mut dp_cell.insert((dp_args.clone(), Dp::init(dp_args.0, dp_args.1))).1,
     };
 
     let states = [&*s1, &*s2, &*s3];
@@ -391,24 +300,7 @@ fn model() -> Html {
                     <label for="pips">{"Pips"}</label>
                     {select(4..=10, pips.clone(), "pips")}
                 </div>
-                <div>
-                    <label for="min1">{"Effect 1 min"}</label>
-                    {number(min1, "min1", "0", "10", "1")}
-                    <label for="w1">{"weight"}</label>
-                    {number(w1, "w1", "", "", "0.1")}
-                </div>
-                <div>
-                    <label for="min2">{"Effect 2 min"}</label>
-                    {number(min2, "min2", "0", "10", "1")}
-                    <label for="w2">{"weight"}</label>
-                    {number(w2, "w2", "", "", "0.1")}
-                </div>
-                <div>
-                    <label for="max3">{"Effect 3 max"}</label>
-                    {number(max3, "max3", "0", "10", "1")}
-                    <label for="w3">{"weight"}</label>
-                    {number(w3, "w3", "", "", "0.1")}
-                </div>
+                {objective_form}
                 <div>
                     <label for="chance">{"Chance of success"}</label>
                     {select((25..=75).step_by(10), chance.clone(), "chance")}
@@ -435,6 +327,108 @@ fn model() -> Html {
             {analysis}
         </>
     };
+}
+
+fn objective_form() -> (Objective, Html) {
+    let simple = use_state_eq(|| true);
+    let min1 = use_state_eq(|| 7);
+    let min2 = use_state_eq(|| 7);
+    let max3 = use_state_eq(|| 4);
+    let w1 = use_state_eq(|| 1.0);
+    let w2 = use_state_eq(|| 1.0);
+    let w3 = use_state_eq(|| -1.0);
+    let complex = use_state_eq(String::new);
+    let parsed_objective = Objective {
+        goal: if *simple {
+            Goal::One(SimpleGoal {
+                min1: *min1,
+                min2: *min2,
+                max3: *max3,
+            })
+        } else {
+            let mut goals = vec![];
+            for item in complex.split(",") {
+                let mut item = item.split("/");
+                if let (Some(a), Some(b), Some(c)) = (item.next(), item.next(), item.next()) {
+                    if let (Ok(a), Ok(b), Ok(c)) =
+                        (a.trim().parse(), b.trim().parse(), c.trim().parse())
+                    {
+                        goals.push(SimpleGoal {
+                            min1: a,
+                            min2: b,
+                            max3: c,
+                        });
+                    }
+                }
+            }
+            Goal::Any(goals)
+        },
+        tiebreaking_weight: [*w1, *w2, *w3],
+    };
+    let chooser = html! {
+        <div id="simple_chooser">
+        <td colspan="9">// wow ugly
+            <input type="radio" id="simple" name="simple" checked={*simple} onchange={let simple = simple.clone(); move |_e| simple.set(true)} />
+            <label for="simple">{"Simple goal"}</label>
+            <input type="radio" id="multiple" name="simple" checked={!*simple} onchange={let simple = simple.clone(); let complex = complex.clone(); let (min1, min2, max3) = (*min1, *min2, *max3); move |_e| {
+                simple.set(false);
+                complex.set(format!("{}/{}/{}", min1, min2, max3));
+            }} />
+            <label for="multiple">{"Multiple goals"}</label>
+        </td>
+        </div>
+    };
+    let form = if *simple {
+        html! {
+            <>
+                {chooser}
+                <div>
+                    <label for="min1">{"Effect 1 min"}</label>
+                    {number(&min1, "min1", "0", "10", "1")}
+                    <label for="w1">{"weight"}</label>
+                    {number(&w1, "w1", "", "", "0.1")}
+                </div>
+                <div>
+                    <label for="min2">{"Effect 2 min"}</label>
+                    {number(&min2, "min2", "0", "10", "1")}
+                    <label for="w2">{"weight"}</label>
+                    {number(&w2, "w2", "", "", "0.1")}
+                </div>
+                <div>
+                    <label for="max3">{"Effect 3 max"}</label>
+                    {number(&max3, "max3", "0", "10", "1")}
+                    <label for="w3">{"weight"}</label>
+                    {number(&w3, "w3", "", "", "0.1")}
+                </div>
+            </>
+        }
+    } else {
+        html! {
+            <>
+                {chooser}
+                <div>
+                    <label for="goal">{"Goals"}</label>
+                    <td>
+                        <input type="text" id="goal" name="goal" value={(*complex).clone()} onchange={move |e: Event| complex.set(e.target_unchecked_into::<HtmlInputElement>().value())} pattern={r#"\s*\d+\s*\/\s*\d+\s*\/\s*\d+\s*(,\s*\d+\s*\/\s*\d+\s*\/\s*\d+\s*)*"#} />
+                        {"(e.g. 9/7/4, 7/9/4)"}
+                    </td>
+                </div>
+                <div>
+                    <label for="w1">{"Effect 1 weight"}</label>
+                    {number(&w1, "w1", "", "", "0.1")}
+                </div>
+                <div>
+                    <label for="w2">{"Effect 2 weight"}</label>
+                    {number(&w2, "w2", "", "", "0.1")}
+                </div>
+                <div>
+                    <label for="w3">{"Effect 3 weight"}</label>
+                    {number(&w3, "w3", "", "", "0.1")}
+                </div>
+            </>
+        }
+    };
+    (parsed_objective, form)
 }
 
 fn main() {
