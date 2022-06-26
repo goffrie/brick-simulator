@@ -210,15 +210,16 @@ fn model() -> Html {
         }
     };
     // Do some jank caching since this calculation is all happening on the main thread
-    let dp_args = (
-        *pips as u8,
-        objective.clone(),
-    );
+    let dp_args = (*pips as u8, objective.clone());
     let dp_state = use_state(|| RefCell::new(None));
     let mut dp_cell = dp_state.borrow_mut();
     let dp = match *dp_cell {
         Some((ref args, ref mut dp)) if *args == dp_args => dp,
-        _ => &mut dp_cell.insert((dp_args.clone(), Dp::init(dp_args.0, dp_args.1))).1,
+        _ => {
+            &mut dp_cell
+                .insert((dp_args.clone(), Dp::init(dp_args.0, dp_args.1)))
+                .1
+        }
     };
 
     let states = [&*s1, &*s2, &*s3];
@@ -335,6 +336,7 @@ fn model() -> Html {
 
 fn objective_form() -> (Objective, Html) {
     let simple = use_state_eq(|| true);
+    let either = use_state_eq(|| false);
     let min1 = use_state_eq(|| 7);
     let min2 = use_state_eq(|| 7);
     let max3 = use_state_eq(|| 4);
@@ -344,11 +346,26 @@ fn objective_form() -> (Objective, Html) {
     let complex = use_state_eq(String::new);
     let parsed_objective = Objective {
         goal: if *simple {
-            Goal::One(SimpleGoal {
-                min1: *min1,
-                min2: *min2,
-                max3: *max3,
-            })
+            if *either && *min1 != *min2 {
+                Goal::Any(vec![
+                    SimpleGoal {
+                        min1: *min1,
+                        min2: *min2,
+                        max3: *max3,
+                    },
+                    SimpleGoal {
+                        min1: *min2,
+                        min2: *min1,
+                        max3: *max3,
+                    },
+                ])
+            } else {
+                Goal::One(SimpleGoal {
+                    min1: *min1,
+                    min2: *min2,
+                    max3: *max3,
+                })
+            }
         } else {
             let mut goals = vec![];
             for item in complex.split(",") {
@@ -374,9 +391,13 @@ fn objective_form() -> (Objective, Html) {
         <td colspan="9">// wow ugly
             <input type="radio" id="simple" name="simple" checked={*simple} onchange={let simple = simple.clone(); move |_e| simple.set(true)} />
             <label for="simple">{"Simple goal"}</label>
-            <input type="radio" id="multiple" name="simple" checked={!*simple} onchange={let simple = simple.clone(); let complex = complex.clone(); let (min1, min2, max3) = (*min1, *min2, *max3); move |_e| {
+            <input type="radio" id="multiple" name="simple" checked={!*simple} onchange={let simple = simple.clone(); let complex = complex.clone(); let (either, min1, min2, max3) = (*either, *min1, *min2, *max3); move |_e| {
                 simple.set(false);
-                complex.set(format!("{}/{}/{}", min1, min2, max3));
+                complex.set(if either && min1 != min2 {
+                    format!("{min1}/{min2}/{max3}, {min2}/{min1}/{max3}")
+                } else {
+                    format!("{min1}/{min2}/{max3}")
+                });
             }} />
             <label for="multiple">{"Multiple goals"}</label>
         </td>
@@ -397,6 +418,8 @@ fn objective_form() -> (Objective, Html) {
                     {number(&min2, "min2", "0", "10", "1")}
                     <label for="w2">{"weight"}</label>
                     {number(&w2, "w2", "", "", "0.1")}
+                    <input type="checkbox" id="either" name="either" checked={*either} onchange={move |e: Event| { either.set(e.target_unchecked_into::<HtmlInputElement>().checked()); }} />
+                    <label for="either">{format!("Allow swapped (i.e. {}/{})", *min2, *min1)}</label>
                 </div>
                 <div>
                     <label for="max3">{"Effect 3 max"}</label>
