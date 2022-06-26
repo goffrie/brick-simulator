@@ -161,6 +161,7 @@ fn model() -> Html {
         use_state_eq(|| Some(window()?.location().search().ok()?.contains("autobrick")));
     let autobrick_enabled = *autobrick_enabled == Some(true);
     let autobrick = use_state_eq(|| None);
+    let autoautobrick = use_state_eq(|| false);
     let do_hit = |s: &UseStateHandle<Vec<bool>>, chance: &UseStateHandle<i32>, success: bool| {
         let mut next = (**s).clone();
         next.push(success);
@@ -244,11 +245,16 @@ fn model() -> Html {
     };
     use_effect({
         let (s1, s2, s3) = (s1.clone(), s2.clone(), s3.clone());
-        let (autobrick, pips, chance) = (autobrick.clone(), pips.clone(), chance.clone());
+        let (autobrick, pips, chance, autoautobrick) = (autobrick.clone(), pips.clone(), chance.clone(), autoautobrick.clone());
         let target = *autobrick;
         let current = s1.len() + s2.len() + s3.len();
         move || {
             log::info!("{:?}", *autobrick);
+            if target.map_or(false, |t| t > current) {
+                let success = Math::random() * 100.0 < f64::from(*chance);
+                let s = [&s1, &s2, &s3][which_hit];
+                do_hit(s, &chance, success);
+            }
             let timeout = match *autobrick {
                 Some(v) if v < *pips * 3 => {
                     let autobrick = autobrick.clone();
@@ -257,16 +263,22 @@ fn model() -> Html {
                     }))
                 }
                 Some(_) => {
-                    autobrick.set(None);
-                    None
+                    if *autoautobrick && success_rate == 0.0 {
+                        Some(Timeout::new(400, move || {
+                            autobrick.set(None);
+                            s1.set(vec![]);
+                            s2.set(vec![]);
+                            s3.set(vec![]);
+                            chance.set(75);
+                            autobrick.set(Some(0));
+                        }))
+                    } else {
+                        autobrick.set(None);
+                        None
+                    }
                 }
                 None => None,
             };
-            if target.map_or(false, |t| t > current) {
-                let success = Math::random() * 100.0 < f64::from(*chance);
-                let s = [&s1, &s2, &s3][which_hit];
-                do_hit(s, &chance, success);
-            }
             move || {
                 if let Some(t) = timeout {
                     t.cancel();
@@ -291,7 +303,11 @@ fn model() -> Html {
             autobrick.set(Some(0));
         };
         html! {
+            <>
             <button onclick={onclick}>{"Autobrick"}</button>
+            <input type="checkbox" checked={*autoautobrick} onchange={let a = autoautobrick.clone(); move |e: Event| a.set(e.target_unchecked_into::<HtmlInputElement>().checked())} id="autoautobrick" />
+            <label for="autoautobrick">{"Autoautobrick"}</label>
+            </>
         }
     } else {
         html! {
