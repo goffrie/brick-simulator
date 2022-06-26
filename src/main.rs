@@ -232,7 +232,11 @@ fn model() -> Html {
         <div id="analysis">
             {if state.terminal() { "".to_string() } else { format!("Next hit: effect {}", which_hit + 1) }}
             <br />
-            {format!("Success probability: {:.3}%", success_rate * 100.0)}
+            {if success_rate == 0.0 {
+                html! {<span class="sad">{"Failed"}</span>}
+            } else {
+                html! {{format!("Success probability: {:.3}%", success_rate * 100.0)}}
+            }}
             <br />
             {format!("Expected tiebreaking weight: {}", expected_weight)}
         </div>
