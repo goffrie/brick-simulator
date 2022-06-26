@@ -250,7 +250,8 @@ fn model() -> Html {
         let current = s1.len() + s2.len() + s3.len();
         move || {
             log::info!("{:?}", *autobrick);
-            if target.map_or(false, |t| t > current) {
+            let settled = !target.map_or(false, |t| t > current);
+            if !settled {
                 let success = Math::random() * 100.0 < f64::from(*chance);
                 let s = [&s1, &s2, &s3][which_hit];
                 do_hit(s, &chance, success);
@@ -262,7 +263,7 @@ fn model() -> Html {
                         autobrick.set(Some(v + 1));
                     }))
                 }
-                Some(_) => {
+                Some(_) if settled => {
                     if *autoautobrick && success_rate == 0.0 {
                         Some(Timeout::new(400, move || {
                             autobrick.set(None);
@@ -277,7 +278,7 @@ fn model() -> Html {
                         None
                     }
                 }
-                None => None,
+                _ => None,
             };
             move || {
                 if let Some(t) = timeout {
